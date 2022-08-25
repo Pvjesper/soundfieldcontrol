@@ -22,3 +22,4 @@ multi_experiments/*/*
 multi_experiments/*/*/*
 
 soundfieldcontrol_PVJesper.egg-info
+.gitignore.bak
