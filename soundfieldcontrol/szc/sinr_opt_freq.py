@@ -4,7 +4,7 @@ import scipy.linalg as splin
 
 import aspcol.matrices as mat
 
-import sinr_opt as sinropt
+import soundfieldcontrol.szc.sinr_opt as sinropt
 
 
 """
