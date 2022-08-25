@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import scipy.linalg as splin
 
 import aspcol.matrices as mat
+import aspcol.utilities as util
 
 
 """
@@ -96,6 +97,8 @@ def normalize_system(R, noise_pow):
     returns normalized_R, normalized_noise_pow
     """
     num_zones = noise_pow.shape[-1]
+    assert noise_pow.ndim == 1
+    assert len(noise_pow) == num_zones
     R_normalized = np.zeros_like(R)
     
     for k in range(num_zones):
@@ -199,13 +202,28 @@ def _power_alloc_qos(gain_mat, noise_pow, sinr_targets):
         'A general duality theory for uplink and downlink beamforming'
     
     """
+    assert _power_alloc_qos_is_feasible(gain_mat, sinr_targets)
     if_mat = _interference_matrix(gain_mat)
     sig_mat = _signal_diag_matrix(gain_mat, sinr_targets)
 
     system_mat = np.eye(gain_mat.shape[-1]) - sig_mat @ if_mat
     answer_mat = sig_mat @ noise_pow[:,None]
     p = splin.solve(system_mat, answer_mat)
+
+    assert np.all(p > 0)
     return p[:,0]
+
+def _power_alloc_qos_is_feasible(gain_mat, sinr_targets):
+    """
+    Derivations in 'A General Duality Theory for Uplink and Downlink Beamforming'
+    
+    """
+    if_mat = _interference_matrix(gain_mat)
+    sig_mat = _signal_diag_matrix(gain_mat, sinr_targets)
+    ev = splin.eigvals(sig_mat @ if_mat)
+    spectral_radius = np.max(np.abs(ev))
+    return spectral_radius < 1
+
 
 
 def power_alloc_minmax_downlink(w, R, noise_pow, sinr_targets, max_pow):
@@ -216,7 +234,7 @@ def power_alloc_minmax_uplink(w, R, noise_pow, sinr_targets, max_pow):
     assert np.allclose(np.linalg.norm(w, axis=-1), 1)
     return _power_alloc_minmax(link_gain_uplink(w, R), noise_pow, sinr_targets, max_pow)
 
-def _power_alloc_minmax(gain_mat, sinr_targets, noise_pow, max_pow):
+def _power_alloc_minmax(gain_mat, noise_pow, sinr_targets, max_pow):
     """
     Tranpose the gain_mat to shift between the downlink and uplink solution
     
@@ -275,22 +293,24 @@ def _extended_coupling_matrix_downlink(signal_mat, if_mat, noise_pow, max_pow):
 
 
 
-def sinr_balance_difference_downlink(w, R, sinr_targets, noise_pow):
-    return _sinr_balance_difference(link_gain_downlink(w, R), sinr_targets, noise_pow)
+def sinr_balance_difference_downlink(w, R, noise_pow, sinr_targets):
+    return _sinr_balance_difference(link_gain_downlink(w, R), noise_pow, sinr_targets)
 
-def sinr_balance_difference_uplink(w, R, sinr_targets, noise_pow):
-    return _sinr_balance_difference(link_gain_uplink(w, R), sinr_targets, noise_pow)
+def sinr_balance_difference_uplink(w, R, noise_pow, sinr_targets):
+    return _sinr_balance_difference(link_gain_uplink(w, R), noise_pow, sinr_targets)
 
-def _sinr_balance_difference(gain_mat, sinr_targets, noise_pow):
+def _sinr_balance_difference(gain_mat, noise_pow, sinr_targets):
     sinr_val = _sinr(gain_mat, noise_pow)
     sinr_ratio  = sinr_targets / sinr_val
     return np.max(sinr_ratio) - np.min(sinr_ratio)
 
-def solve_qos_uplink(R, sinr_targets, noise_pow, max_pow, tolerance=1e-3, max_iters=100):
+
+@util.measure("Schubert uplink")
+def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-8, max_iters=20):
     num_zones = R.shape[0]
     #bf_len = R.shape[-1]
 
-    R, noise_pow = normalize_system(R, noise_pow)
+    #R, noise_pow = normalize_system(R, noise_pow)
     q = np.zeros((num_zones))
     n = 0
 
@@ -301,13 +321,12 @@ def solve_qos_uplink(R, sinr_targets, noise_pow, max_pow, tolerance=1e-3, max_it
         if is_feasible:
             q = power_alloc_qos_uplink(w, R, noise_pow, sinr_targets)
         else:
-            q, c = power_alloc_minmax_uplink(w, R, sinr_targets, noise_pow, max_pow)
+            q, c = power_alloc_minmax_uplink(w, R, noise_pow, sinr_targets, max_pow)
             print(f"capacity: {c}")
             if c > 1:
                 is_feasible = True
 
-        w_scaled = apply_power_vec(w, q)
-        cost = sinr_balance_difference_uplink(w_scaled, R, sinr_targets, noise_pow)
+        cost = sinr_balance_difference_uplink(apply_power_vec(w, q), R, noise_pow, sinr_targets)
         print(f"Iter {n} - Cost: {cost}")
         if cost < tolerance or n == max_iters:
             break
@@ -315,10 +334,10 @@ def solve_qos_uplink(R, sinr_targets, noise_pow, max_pow, tolerance=1e-3, max_it
 
     return w, q
 
-def solve_minmax_uplink(R, sinr_targets, noise_pow, max_pow, tolerance=1e-7, max_iters=15, return_all=False):
+def solve_minmax_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-7, max_iters=15, return_all=False):
     num_zones = R.shape[0]
 
-    R, noise_pow = normalize_system(R, noise_pow)
+    #R, noise_pow = normalize_system(R, noise_pow)
 
     q = np.zeros((num_zones))
     capacity = []
@@ -328,13 +347,13 @@ def solve_minmax_uplink(R, sinr_targets, noise_pow, max_pow, tolerance=1e-7, max
     while True:
         w = _beamformer_minmax_uplink(q, R)
         w = normalize_beamformer(w)
-        q, c = power_alloc_minmax_uplink(w, R, sinr_targets, noise_pow, max_pow)
+        q, c = power_alloc_minmax_uplink(w, R, noise_pow, sinr_targets, max_pow)
 
         capacity.append(c)
 
-        w_scaled = apply_power_vec(w, q)
-        cost = sinr_balance_difference_uplink(w_scaled, R, sinr_targets, noise_pow)
+        cost = sinr_balance_difference_uplink(apply_power_vec(w, q), R, noise_pow, sinr_targets)
         cost_alt = 1 / capacity[-2] -  1 / capacity[-1] if len(capacity)>2 else np.inf
+        assert cost_alt > - 1e-16
         cost_value.append(cost)
 
         print(f"Iter {n} - Cost: {cost_value[-1]}")
@@ -349,15 +368,15 @@ def solve_minmax_uplink(R, sinr_targets, noise_pow, max_pow, tolerance=1e-7, max
     return w, q
 
 
-def _beamformer_minmax_downlink(R, sinr_targets, noise_pow, max_pow, rng=None):
-    if rng is None:
-        rng = np.random.default_rng(12325)
-    num_zones = R.shape[0]
-    bf_len = R.shape[-1]
+# def _beamformer_minmax_downlink(R, noise_pow, sinr_targets, max_pow, rng=None):
+#     if rng is None:
+#         rng = np.random.default_rng(12325)
+#     num_zones = R.shape[0]
+#     bf_len = R.shape[-1]
 
-    w_init = rng.normal(size=(num_zones, bf_len)) + 1j * rng.normal(size=(num_zones, bf_len))
+#     w_init = rng.normal(size=(num_zones, bf_len)) + 1j * rng.normal(size=(num_zones, bf_len))
 
-    gain_mat = _link_gain(w_init, R)
+#     gain_mat = _link_gain(w_init, R)
 
 
 def _beamformer_minmax_uplink(q, R):
