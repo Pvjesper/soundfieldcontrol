@@ -3,7 +3,7 @@ import scipy.linalg as splin
 
 import aspcol.matrices as mat
 
-
+import aspcol.utilities as util
 
 def acc(Rb, Rd):
     """
@@ -26,7 +26,7 @@ def acc(Rb, Rd):
     #ir *= 1e4
     return evec[:,-1] * np.sqrt(eigvals[-1])
 
-
+@util.measure("ACC")
 def acc_all_zones(R):
     """
     R is of shape (num_zones, num_zones, bf_len, bf_len)

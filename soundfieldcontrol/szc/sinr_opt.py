@@ -216,13 +216,18 @@ def _power_alloc_qos(gain_mat, noise_pow, sinr_targets):
 def _power_alloc_qos_is_feasible(gain_mat, sinr_targets):
     """
     Derivations in 'A General Duality Theory for Uplink and Downlink Beamforming'
-    
+    """
+    return _power_alloc_qos_feasibility_spectral_radius(gain_mat, sinr_targets) < 1
+
+def _power_alloc_qos_feasibility_spectral_radius(gain_mat, sinr_targets):
+    """
+    Derivations in 'A General Duality Theory for Uplink and Downlink Beamforming'
     """
     if_mat = _interference_matrix(gain_mat)
     sig_mat = _signal_diag_matrix(gain_mat, sinr_targets)
     ev = splin.eigvals(sig_mat @ if_mat)
     spectral_radius = np.max(np.abs(ev))
-    return spectral_radius < 1
+    return spectral_radius
 
 
 
@@ -246,9 +251,10 @@ def _power_alloc_minmax(gain_mat, noise_pow, sinr_targets, max_pow):
     #print(eigvals)
 
     max_ev_idx = np.argmax(np.real(eigvals))
-    pow_vec = eigvec[:-1, max_ev_idx] / eigvec[-1, max_ev_idx]
-    assert np.all(pow_vec > 0)
-    assert np.all([eigvals[i] <= 1e-13 for i in range(len(eigvals)) if i != max_ev_idx])
+    pow_vec = np.real_if_close(eigvec[:-1, max_ev_idx] / eigvec[-1, max_ev_idx])
+    assert np.all(pow_vec > 0) #the dominant eigenvector should be positive
+    if not np.all([eigvals[i] <= 1e-10 for i in range(len(eigvals)) if i != max_ev_idx]): #only one eigenvalue should be positive
+        print(f"Warning: Not only one eigenvalue is positive: {eigvals}")
     #print (f"Eigvals: {eigvals}")
 
 

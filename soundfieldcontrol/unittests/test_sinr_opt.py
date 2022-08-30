@@ -109,12 +109,19 @@ def test_power_alloc_minmax_equal_to_max_pow(num_zones, num_ls, max_pow):
     st.integers(min_value=2, max_value=5),
 )
 def test_power_alloc_qos_zero_sinr_margin_downlink(num_zones, num_ls):
-    w = get_random_beamformer_normalized(num_zones, num_ls)
-    R = get_random_spatial_cov(num_zones, num_ls)
-    noise_pow = get_random_noise_pow(num_zones)
-    rng = np.random.default_rng(SEED+12)
-    sinr_targets = rng.uniform(low=0.05, high=0.2, size=num_zones)
-
+    num_test_attempts = 100
+    feasible = False
+    for i in range(num_test_attempts):
+        w = get_random_beamformer_normalized(num_zones, num_ls)
+        R = get_random_spatial_cov(num_zones, num_ls)
+        noise_pow = get_random_noise_pow(num_zones)
+        rng = np.random.default_rng(SEED+12)
+        sinr_targets = rng.uniform(low=0.05, high=0.3, size=num_zones)
+        if sinropt._power_alloc_qos_is_feasible(sinropt.link_gain_downlink(w, R), sinr_targets):
+            feasible = True
+            break
+    assert feasible
+    
     p_dl = sinropt.power_alloc_qos_downlink(w, R, noise_pow, sinr_targets)
     margin_dl = sinropt.sinr_margin_downlink(sinropt.apply_power_vec(w, p_dl), R, noise_pow, sinr_targets)
     assert np.allclose(margin_dl, 0)
@@ -131,7 +138,7 @@ def test_power_alloc_qos_zero_sinr_margin_uplink(num_zones, num_ls):
     rng = np.random.default_rng(SEED+12)
     sinr_targets = rng.uniform(low=0.05, high=0.2, size=num_zones)
 
-    R, noise_pow = sinropt.normalize_system(R, noise_pow)
+    #R, noise_pow = sinropt.normalize_system(R, noise_pow)
 
     p = sinropt.power_alloc_qos_uplink(w, R, noise_pow, sinr_targets)
     margin = sinropt.sinr_margin_uplink(sinropt.apply_power_vec(w, p), R, noise_pow, sinr_targets)
