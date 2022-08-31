@@ -109,11 +109,11 @@ def normalize_system(R, noise_pow):
 def apply_power_vec(w, p):
     """
     w is (num_freq, num_zones, num_sources), or (num_zones, bf_len)
-    
     """
     return np.sqrt(p[...,None]) * w
 
-
+def _is_unit_vector(w):
+    return np.allclose(np.linalg.norm(w, axis=-1), 1)
 
 
 
@@ -150,13 +150,15 @@ def _link_gain(w, R):
 
 
 
-def sinr_downlink(w, R, noise_pow):
-    return _sinr(link_gain_downlink(w, R), noise_pow)
+def sinr_downlink(p, w, R, noise_pow):
+    assert _is_unit_vector(w)
+    return _sinr(p, link_gain_downlink(w, R), noise_pow)
 
-def sinr_uplink(w, R, noise_pow):
-    return _sinr(link_gain_uplink(w, R), noise_pow)
+def sinr_uplink(p, w, R, noise_pow):
+    assert _is_unit_vector(w)
+    return _sinr(p, link_gain_uplink(w, R), noise_pow)
 
-def _sinr(gain_mat, noise_pow):
+def _sinr(p, gain_mat, noise_pow):
     """
     if gain_mat is obtained from the function link_gain
         then gain_mat = link_gain() matches the downlink SINR
@@ -167,31 +169,38 @@ def _sinr(gain_mat, noise_pow):
 
     returns a SINR for each zone, an array of shape (num_zones,)
     """
+    assert p.ndim == 1
     assert gain_mat.ndim == 2
     assert gain_mat.shape[0] == gain_mat.shape[1]
     num_zones = gain_mat.shape[0]
-    interference = _sum_interference(_interference_matrix(gain_mat))
+    assert len(p) == num_zones
+    assert len(noise_pow) == num_zones
+
+    gain_mat_scaled = gain_mat @ np.diag(p)
+    interference = _sum_interference(_interference_matrix(gain_mat_scaled))
 
     sinr_val = np.zeros((num_zones))
     for k in range(num_zones):
-        sinr_val[k] = gain_mat[k,k] / (interference[k] + noise_pow[k])
+        sinr_val[k] = gain_mat_scaled[k,k] / (interference[k] + noise_pow[k])
     return sinr_val
 
 def _sum_interference(interference_mat):
     return np.sum(interference_mat, axis=-1)
         
 
-def sinr_margin_downlink(w, R, noise_pow, sinr_targets):
-    return sinr_downlink(w, R, noise_pow) - sinr_targets
+def sinr_margin_downlink(p, w, R, noise_pow, sinr_targets):
+    return sinr_downlink(p, w, R, noise_pow) - sinr_targets
 
-def sinr_margin_uplink(w, R, noise_pow, sinr_targets):
-    return sinr_uplink(w, R, noise_pow) - sinr_targets
+def sinr_margin_uplink(p, w, R, noise_pow, sinr_targets):
+    return sinr_uplink(p, w, R, noise_pow) - sinr_targets
     
 
 def power_alloc_qos_downlink(w, R, noise_pow, sinr_targets):
+    assert _is_unit_vector(w)
     return _power_alloc_qos(link_gain_downlink(w, R), noise_pow, sinr_targets)
 
 def power_alloc_qos_uplink(w, R, noise_pow, sinr_targets):
+    assert _is_unit_vector(w)
     return _power_alloc_qos(link_gain_uplink(w, R), noise_pow, sinr_targets)
 
 def _power_alloc_qos(gain_mat, noise_pow, sinr_targets):
@@ -232,11 +241,11 @@ def _power_alloc_qos_feasibility_spectral_radius(gain_mat, sinr_targets):
 
 
 def power_alloc_minmax_downlink(w, R, noise_pow, sinr_targets, max_pow):
-    assert np.allclose(np.linalg.norm(w, axis=-1), 1)
+    assert _is_unit_vector(w)
     return _power_alloc_minmax(link_gain_downlink(w, R), noise_pow, sinr_targets, max_pow)
 
 def power_alloc_minmax_uplink(w, R, noise_pow, sinr_targets, max_pow):
-    assert np.allclose(np.linalg.norm(w, axis=-1), 1)
+    assert _is_unit_vector(w)
     return _power_alloc_minmax(link_gain_uplink(w, R), noise_pow, sinr_targets, max_pow)
 
 def _power_alloc_minmax(gain_mat, noise_pow, sinr_targets, max_pow):
@@ -299,20 +308,20 @@ def _extended_coupling_matrix_downlink(signal_mat, if_mat, noise_pow, max_pow):
 
 
 
-def sinr_balance_difference_downlink(w, R, noise_pow, sinr_targets):
-    return _sinr_balance_difference(link_gain_downlink(w, R), noise_pow, sinr_targets)
+def sinr_balance_difference_downlink(p, w, R, noise_pow, sinr_targets):
+    return _sinr_balance_difference(p, link_gain_downlink(w, R), noise_pow, sinr_targets)
 
-def sinr_balance_difference_uplink(w, R, noise_pow, sinr_targets):
-    return _sinr_balance_difference(link_gain_uplink(w, R), noise_pow, sinr_targets)
+def sinr_balance_difference_uplink(p, w, R, noise_pow, sinr_targets):
+    return _sinr_balance_difference(p, link_gain_uplink(w, R), noise_pow, sinr_targets)
 
-def _sinr_balance_difference(gain_mat, noise_pow, sinr_targets):
-    sinr_val = _sinr(gain_mat, noise_pow)
+def _sinr_balance_difference(p, gain_mat, noise_pow, sinr_targets):
+    sinr_val = _sinr(p, gain_mat, noise_pow)
     sinr_ratio  = sinr_targets / sinr_val
     return np.max(sinr_ratio) - np.min(sinr_ratio)
 
 
 @util.measure("Schubert uplink")
-def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-8, max_iters=20):
+def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-8, max_iters=20, min_iters=5):
     num_zones = R.shape[0]
     #bf_len = R.shape[-1]
 
@@ -322,6 +331,7 @@ def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-8, max_it
 
     is_feasible = False
     while True:
+        print(f"Iter {n}")
         w = _beamformer_minmax_uplink(q, R)
         w = normalize_beamformer(w)
         if is_feasible:
@@ -331,10 +341,11 @@ def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-8, max_it
             print(f"capacity: {c}")
             if c > 1:
                 is_feasible = True
-
-        cost = sinr_balance_difference_uplink(apply_power_vec(w, q), R, noise_pow, sinr_targets)
-        print(f"Iter {n} - Cost: {cost}")
-        if cost < tolerance or n == max_iters:
+        
+        cost = sinr_balance_difference_uplink(q, w, R, noise_pow, sinr_targets)
+        print(f"Cost: {cost}")
+        print(f"Total power: {np.sum(q)}")
+        if (is_feasible and cost < tolerance and n >= min_iters) or n == max_iters:
             break
         n += 1
 
@@ -347,30 +358,35 @@ def solve_minmax_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-7, max
 
     q = np.zeros((num_zones))
     capacity = []
-    cost_value = []
+    sinr_balance_diff = []
     n = 0
 
     while True:
+        print(f"Iter {n}")
         w = _beamformer_minmax_uplink(q, R)
         w = normalize_beamformer(w)
         q, c = power_alloc_minmax_uplink(w, R, noise_pow, sinr_targets, max_pow)
 
         capacity.append(c)
 
-        cost = sinr_balance_difference_uplink(apply_power_vec(w, q), R, noise_pow, sinr_targets)
-        cost_alt = 1 / capacity[-2] -  1 / capacity[-1] if len(capacity)>2 else np.inf
-        assert cost_alt > - 1e-16
-        cost_value.append(cost)
+        sinr_balance_diff = sinr_balance_difference_uplink(q, w, R, noise_pow, sinr_targets)
+        max_ev_change = 1 / capacity[-2] -  1 / capacity[-1] if len(capacity)>2 else np.inf
+        assert max_ev_change > - 1e-16 # The next iteration should always be better
+        sinr_balance_diff.append(sinr_balance_diff)
 
-        print(f"Iter {n} - Cost: {cost_value[-1]}")
-        if len(cost_value) > 2:
-            if cost_alt < tolerance or len(capacity) == max_iters:
+        print(f"Capacity: {c}")
+        print(f"Max eigenvalue change: {max_ev_change}")
+        print(f"SINR balance difference: {sinr_balance_diff[-1]}")
+        print(f"Total power: {np.sum(q)}")
+        print("")
+        if len(sinr_balance_diff) > 2:
+            if max_ev_change < tolerance or len(capacity) == max_iters:
                 break
         n += 1
     print(capacity)
 
     if return_all:
-        return w, q, capacity, cost_value
+        return w, q, capacity, sinr_balance_diff
     return w, q
 
 
@@ -431,7 +447,7 @@ def _beamformer_minmax_uplink(q, R):
 
 
 
-def _sinr_uplink_comparison(w, R, q, noise_pow):
+def _sinr_uplink_comparison(p, w, R, noise_pow):
     """
     Only for debugging purposes, to verify that downlink and uplink are not mixed
     
@@ -451,37 +467,37 @@ def _sinr_uplink_comparison(w, R, q, noise_pow):
         for i in range(num_zones):
             if k != i:
                 if R.ndim == 3:
-                    Q += q[k] * R[i,:,:]
+                    Q += p[i] * R[i,:,:]
                 elif R.ndim == 4:
-                    Q += q[k] * R[i,k,:,:]
-        sig = q[k] * np.real_if_close(np.squeeze(w[k,:,None].T.conj() @ R[k,:,:] @ w[k,:,None]))
+                    Q += p[i] * R[i,k,:,:]
+        sig = p[k] * np.real_if_close(np.squeeze(w[k,:,None].T.conj() @ R[k,:,:] @ w[k,:,None]))
         interference = np.real_if_close(np.squeeze(w[k,:,None].T.conj() @ Q @ w[k,:,None])) + noise_pow[k]
         sinr_val[k] = sig / interference
     return sinr_val
 
 
-def _sinr_uplink_comparison_2(w, R, noise_pow):
-    """
-    Only for debugging purposes, to verify that downlink and uplink are not mixed
+# def _sinr_uplink_comparison_2(w, R, noise_pow):
+#     """
+#     Only for debugging purposes, to verify that downlink and uplink are not mixed
     
-    """
+#     """
     
-    num_zones = R.shape[0]
-    sinr_val = np.zeros((num_zones))
+#     num_zones = R.shape[0]
+#     sinr_val = np.zeros((num_zones))
 
-    for k in range(num_zones):
-        interference = 0
-        #Q += np.eye(bf_len)
-        for i in range(num_zones):
-            if k != i:
-                #if R.ndim == 3:
-                interference += np.real_if_close(np.squeeze(w[k,:,None].T.conj() @ R[i,:,:] @ w[k,:,None])) 
-                #elif R.ndim == 4:
-                #    Q += q[i] * R[i,k,:,:]
-        sig = np.real_if_close(np.squeeze(w[k,:,None].T.conj() @ R[k,:,:] @ w[k,:,None]))
-        interference += noise_pow[k]
-        sinr_val[k] = sig / interference
-    return sinr_val
+#     for k in range(num_zones):
+#         interference = 0
+#         #Q += np.eye(bf_len)
+#         for i in range(num_zones):
+#             if k != i:
+#                 #if R.ndim == 3:
+#                 interference += np.real_if_close(np.squeeze(w[k,:,None].T.conj() @ R[i,:,:] @ w[k,:,None])) 
+#                 #elif R.ndim == 4:
+#                 #    Q += q[i] * R[i,k,:,:]
+#         sig = np.real_if_close(np.squeeze(w[k,:,None].T.conj() @ R[k,:,:] @ w[k,:,None]))
+#         interference += noise_pow[k]
+#         sinr_val[k] = sig / interference
+#     return sinr_val
 
 
 def _sinr_downlink_comparison(w, R, noise_pow):

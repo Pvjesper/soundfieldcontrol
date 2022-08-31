@@ -204,44 +204,44 @@ def sinr_constrained_pow_min_uplink_separated(R_values, noise_pow, sinr_targets)
     return opt_mat
 
 
-def power_allocation_uplink(w, R, noise_pow, sinr_targets):
-    """
-    Minimizes the power when the SINR equals the sinr_targets
+# def power_allocation_uplink(w, R, noise_pow, sinr_targets):
+#     """
+#     Minimizes the power when the SINR equals the sinr_targets
 
-    Closed form derivations and proofs given in 
-        'A general duality theory for uplink and downlink beamforming'
+#     Closed form derivations and proofs given in 
+#         'A general duality theory for uplink and downlink beamforming'
     
-    """
-    num_zones = w.shape[0]
-    gain_mat = sinropt._link_gain(w, R)
-    if_mat = sinropt.interference_matrix(gain_mat)
-    sig_mat = sinropt.signal_diag_matrix(gain_mat, sinr_targets)
+#     """
+#     num_zones = w.shape[0]
+#     gain_mat = sinropt._link_gain(w, R)
+#     if_mat = sinropt.interference_matrix(gain_mat)
+#     sig_mat = sinropt.signal_diag_matrix(gain_mat, sinr_targets)
 
-    system_mat = np.eye(num_zones) - sig_mat @ if_mat
-    answer_mat = sig_mat @ noise_pow[:,None]
+#     system_mat = np.eye(num_zones) - sig_mat @ if_mat
+#     answer_mat = sig_mat @ noise_pow[:,None]
 
-    p = splin.solve(system_mat, answer_mat)
-    return p[:,0]
+#     p = splin.solve(system_mat, answer_mat)
+#     return p[:,0]
 
-def power_allocation_downlink(w, R, noise_pow, sinr_targets):
-    """
-    Minimizes the power when the SINR equals the sinr_targets
+# def power_allocation_downlink(w, R, noise_pow, sinr_targets):
+#     """
+#     Minimizes the power when the SINR equals the sinr_targets
 
-    Closed form derivations and proofs given in 
-        'A general duality theory for uplink and downlink beamforming'
+#     Closed form derivations and proofs given in 
+#         'A general duality theory for uplink and downlink beamforming'
     
-    returns the power vector of shape (num_zones)
-    """
-    num_zones = w.shape[0]
-    gain_mat = sinropt._link_gain(w, R)
-    if_mat = sinropt._interference_matrix(gain_mat)
-    sig_mat = sinropt._signal_diag_matrix(gain_mat, sinr_targets)
+#     returns the power vector of shape (num_zones)
+#     """
+#     num_zones = w.shape[0]
+#     gain_mat = sinropt._link_gain(w, R)
+#     if_mat = sinropt._interference_matrix(gain_mat)
+#     sig_mat = sinropt._signal_diag_matrix(gain_mat, sinr_targets)
 
-    system_mat = np.eye(num_zones) - sig_mat @ if_mat.T
-    answer_mat = sig_mat @ noise_pow[:,None]
+#     system_mat = np.eye(num_zones) - sig_mat @ if_mat.T
+#     answer_mat = sig_mat @ noise_pow[:,None]
 
-    p = splin.solve(system_mat, answer_mat)
-    return p[:,0]
+#     p = splin.solve(system_mat, answer_mat)
+#     return p[:,0]
 
 
 
@@ -320,36 +320,36 @@ def link_gain_sdr(W, R):
 #     G = link_gain(w, R)
 #     raise NotImplementedError
 
-def sinr_margin_downlink(bf_vec, R, noise_pow, sinr_constraint):
-    """
-    bf_vec is of shape (num_zones, bf_len)
-    R is of shape (num_zones, num_zones, bf_len, bf_len)m
-    noise_pow is of shape  (num_zones)
-    sinr_constraint is of shape (num_zones)
+# def sinr_margin_downlink(bf_vec, R, noise_pow, sinr_constraint):
+#     """
+#     bf_vec is of shape (num_zones, bf_len)
+#     R is of shape (num_zones, num_zones, bf_len, bf_len)m
+#     noise_pow is of shape  (num_zones)
+#     sinr_constraint is of shape (num_zones)
 
-    Calculates how much SINR can be reduced before violating the constraint
-        frac{w_k^H R_k w_k}{ sum_{i \neq k} w_i^H R_k w_i + sigma_k^2} \geq sinr_constraint_k
-        for each zone k. 
-        The constraint is satisfied if all values are 0 or higher
+#     Calculates how much SINR can be reduced before violating the constraint
+#         frac{w_k^H R_k w_k}{ sum_{i \neq k} w_i^H R_k w_i + sigma_k^2} \geq sinr_constraint_k
+#         for each zone k. 
+#         The constraint is satisfied if all values are 0 or higher
 
-    returns an array of shape (num_zones)
-    """
-    num_zones = bf_vec.shape[0]
-    bf_len = bf_vec.shape[1]
-    assert bf_vec.ndim == 2
-    assert R.shape == (num_zones, num_zones, bf_len, bf_len)
+#     returns an array of shape (num_zones)
+#     """
+#     num_zones = bf_vec.shape[0]
+#     bf_len = bf_vec.shape[1]
+#     assert bf_vec.ndim == 2
+#     assert R.shape == (num_zones, num_zones, bf_len, bf_len)
 
-    margin = np.zeros((num_zones))
+#     margin = np.zeros((num_zones))
 
-    for k in range(num_zones):
-        signal_power = np.squeeze(bf_vec[k,:,None].T @ R[k,k,:,:] @ bf_vec[k,:,None])
-        interference_power = 0
-        for i in range(num_zones):
-            if i != k:
-                interference_power += np.squeeze(bf_vec[i,:,None].T @ R[k,i,:,:] @ bf_vec[i,:,None])
-        interference_power += noise_pow[k]
-        margin[k] = (signal_power / interference_power) - sinr_constraint[k]
-    return margin
+#     for k in range(num_zones):
+#         signal_power = np.squeeze(bf_vec[k,:,None].T @ R[k,k,:,:] @ bf_vec[k,:,None])
+#         interference_power = 0
+#         for i in range(num_zones):
+#             if i != k:
+#                 interference_power += np.squeeze(bf_vec[i,:,None].T @ R[k,i,:,:] @ bf_vec[i,:,None])
+#         interference_power += noise_pow[k]
+#         margin[k] = (signal_power / interference_power) - sinr_constraint[k]
+#     return margin
 
 
 def sinr_margin_downlink_sdr(W, R, noise_pow, sinr_constraint):
@@ -416,22 +416,22 @@ def sinr_margin_downlink_sdr(W, R, noise_pow, sinr_constraint):
 
 
 
-def power_assignment_minmax_downlink(w, R, sinr_targets, noise_pow, max_pow):
-    """
-    Solves the optimization max_p min_i \frac{SINR_i}{gamma_i}, constrained such that
-        the power equals the given max power, sum_i p_i = P_{max}.
+# def power_assignment_minmax_downlink(w, R, sinr_targets, noise_pow, max_pow):
+#     """
+#     Solves the optimization max_p min_i \frac{SINR_i}{gamma_i}, constrained such that
+#         the power equals the given max power, sum_i p_i = P_{max}.
     
-    For more details, check out Schubert & Bosche - Solution of the 
-        Multiuser Downlink Beamforming Problem With Individual SINR Constraints
-    """
-    assert np.allclose(np.linalg.norm(w, axis=-1), 1)
-    gain_mat = sinropt._link_gain(w, R)
-    return sinropt._power_alloc_minmax(gain_mat, sinr_targets, noise_pow, max_pow)
+#     For more details, check out Schubert & Bosche - Solution of the 
+#         Multiuser Downlink Beamforming Problem With Individual SINR Constraints
+#     """
+#     assert np.allclose(np.linalg.norm(w, axis=-1), 1)
+#     gain_mat = sinropt._link_gain(w, R)
+#     return sinropt._power_alloc_minmax(gain_mat, sinr_targets, noise_pow, max_pow)
 
-def power_assignment_minmax_uplink(w, R, sinr_targets, noise_pow, max_pow):
-    assert np.allclose(np.linalg.norm(w, axis=-1), 1)
-    gain_mat = sinropt._link_gain(w, R).T
-    return sinropt._power_alloc_minmax(gain_mat, sinr_targets, noise_pow, max_pow)
+# def power_assignment_minmax_uplink(w, R, sinr_targets, noise_pow, max_pow):
+#     assert np.allclose(np.linalg.norm(w, axis=-1), 1)
+#     gain_mat = sinropt._link_gain(w, R).T
+#     return sinropt._power_alloc_minmax(gain_mat, sinr_targets, noise_pow, max_pow)
 
 
 
