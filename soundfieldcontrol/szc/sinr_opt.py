@@ -55,7 +55,19 @@ def sum_pow_of_vec(bf_vec):
     """
     return np.sum(np.abs(bf_vec)**2, axis=(-2, -1))
 
+def sum_weighted_pow(bf_vec, weighting_mat):
+    """
+    bf_vec is complex or real beamformer vector of shape
+        (num_zones, bf_len)
+    weighting_mat is shape (num_zones, bf_len, bf_len)
 
+    returns the weighted sum power, so a scalar
+    
+    """
+    num_zones = bf_vec.shape[0]
+    return np.sum([np.squeeze(bf_vec[k,:,None].T @ weighting_mat[k,:,:] @ bf_vec[k,:,None]) for k in range(num_zones)])
+
+@util.measure("Select solution eigenvalue")
 def select_solution_eigenvalue(opt_mat, verbose=False):
     """
     opt_mat is of shape (..., beamformer_len, beamformer_len)
@@ -79,7 +91,7 @@ def normalize_beamformer(w):
     Normalizes the beamformer vector w_k
         so that each vector is length one, meaning ||w_k||_2 == 1
     """
-    w_norm = np.zeros_like(w)
+    #w_norm = np.zeros_like(w)
     norm = splin.norm(w, axis=-1)
     w_norm = w / norm[...,None]
     return w_norm
@@ -111,6 +123,18 @@ def apply_power_vec(w, p):
     w is (num_freq, num_zones, num_sources), or (num_zones, bf_len)
     """
     return np.sqrt(p[...,None]) * w
+
+def extract_power_vec(w):
+    """
+    Opposite of apply_power_vec
+    This function takes a non-unit-vector w and returns a unit vector w_norm
+    along with the power p such that apply_power_vec(w_norm, p) = w
+
+    w is (num_freq, num_zones, num_sources), or (num_zones, bf_len)
+    """
+    norm = splin.norm(w, axis=-1)
+    w_norm = w / norm[...,None]
+    return w_norm, norm**2
 
 def _is_unit_vector(w):
     return np.allclose(np.linalg.norm(w, axis=-1), 1)
@@ -262,7 +286,7 @@ def _power_alloc_minmax(gain_mat, noise_pow, sinr_targets, max_pow):
     max_ev_idx = np.argmax(np.real(eigvals))
     pow_vec = np.real_if_close(eigvec[:-1, max_ev_idx] / eigvec[-1, max_ev_idx])
     assert np.all(pow_vec > 0) #the dominant eigenvector should be positive
-    if not np.all([eigvals[i] <= 1e-10 for i in range(len(eigvals)) if i != max_ev_idx]): #only one eigenvalue should be positive
+    if not np.all([eigvals[i] <= 1e-10 for i in range(len(eigvals)) if i != max_ev_idx]): #only one eigenvalue should be positive (not sure this should be true actually)
         print(f"Warning: Not only one eigenvalue is positive: {eigvals}")
     #print (f"Eigvals: {eigvals}")
 
@@ -321,13 +345,15 @@ def _sinr_balance_difference(p, gain_mat, noise_pow, sinr_targets):
 
 
 @util.measure("Schubert uplink")
-def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-8, max_iters=20, min_iters=5):
+def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-12, max_iters=20, min_iters=5):
     num_zones = R.shape[0]
     #bf_len = R.shape[-1]
 
     #R, noise_pow = normalize_system(R, noise_pow)
     q = np.zeros((num_zones))
     n = 0
+    beamformers = []
+    power_vectors = []
 
     is_feasible = False
     while True:
@@ -339,14 +365,23 @@ def solve_qos_uplink(R, noise_pow, sinr_targets, max_pow, tolerance=1e-8, max_it
         else:
             q, c = power_alloc_minmax_uplink(w, R, noise_pow, sinr_targets, max_pow)
             print(f"capacity: {c}")
-            if c > 1:
+            #if c > 1:
+            if _power_alloc_qos_feasibility_spectral_radius(link_gain_uplink(w, R), sinr_targets) < 1:
                 is_feasible = True
         
-        cost = sinr_balance_difference_uplink(q, w, R, noise_pow, sinr_targets)
-        print(f"Cost: {cost}")
+        beamformers.append(w)
+        power_vectors.append(q)
+        sinr_balance_diff = sinr_balance_difference_uplink(q, w, R, noise_pow, sinr_targets)
+        print(f"SINR balance difference: {sinr_balance_diff}")
         print(f"Total power: {np.sum(q)}")
-        if (is_feasible and cost < tolerance and n >= min_iters) or n == max_iters:
-            break
+        if n >= 1:
+            pow_diff = np.mean(np.abs(power_vectors[-1] - power_vectors[-2])**2)
+            bf_diff = np.mean(np.abs(beamformers[-1] - beamformers[-2])**2)
+            print(f"Power mean square difference: {pow_diff}")
+            print(f"Beamformer mean square difference: {bf_diff}")
+            
+            if (is_feasible and pow_diff < tolerance and bf_diff < tolerance) or n == max_iters:
+                break
         n += 1
 
     return w, q
@@ -428,6 +463,86 @@ def _beamformer_minmax_uplink(q, R):
 
 
 
+
+
+
+
+
+
+
+@util.measure("Schubert weighted uplink")
+def solve_power_weighted_qos_uplink(R, noise_pow, sinr_targets, max_pow, audio_cov, tolerance=1e-12, max_iters=20):
+    num_zones = R.shape[0]
+    #bf_len = R.shape[-1]
+    #assert np.allclose(noise_pow, 1)
+
+    #R, noise_pow = normalize_system(R, noise_pow)
+    q = np.zeros((num_zones))
+    n = 0
+    beamformers = []
+    power_vectors = []
+
+    is_feasible = False
+    while True:
+        print(f"Iter {n}")
+        w = _beamformer_minmax_weighted_uplink(q, R, audio_cov)
+        w = normalize_beamformer(w)
+        s = np.squeeze(np.array([w[k,:,None].T @ audio_cov[k,:,:] @ w[k,:,None] for k in range(num_zones)]))
+        if is_feasible:
+            q = power_alloc_qos_uplink(w, R, s, sinr_targets)
+        else:
+            q, c = power_alloc_minmax_uplink(w, R, s, sinr_targets, max_pow)
+            print(f"capacity: {c}")
+            
+            #if c > 1:
+            if _power_alloc_qos_feasibility_spectral_radius(link_gain_uplink(w, R), sinr_targets) < 1:
+                is_feasible = True
+            
+            # if c > 1:
+            #     is_feasible = True
+        
+        beamformers.append(w)
+        power_vectors.append(q)
+        sinr_balance_diff = sinr_balance_difference_uplink(q, w, R, noise_pow, sinr_targets)
+        print(f"SINR balance difference: {sinr_balance_diff}")
+        print(f"Total power: {np.sum(q)}")
+        print(f"Uplink feasibility spectral radius: {_power_alloc_qos_feasibility_spectral_radius(link_gain_uplink(w, R), sinr_targets)}")
+        print(f"Downlink feasibility spectral radius: {_power_alloc_qos_feasibility_spectral_radius(link_gain_downlink(w, R), sinr_targets)}")
+        if n >= 1:
+            pow_diff = np.mean(np.abs(power_vectors[-1] - power_vectors[-2])**2)
+            bf_diff = np.mean(np.abs(beamformers[-1] - beamformers[-2])**2)
+            print(f"Power mean square difference: {pow_diff}")
+            print(f"Beamformer mean square difference: {bf_diff}")
+            
+            if (is_feasible and pow_diff < tolerance and bf_diff < tolerance) or n == max_iters:
+                break
+        n += 1
+
+    return w, q
+
+
+def _beamformer_minmax_weighted_uplink(q, R, audio_cov):
+    num_zones = R.shape[0]
+    bf_len = R.shape[-1]
+
+    w = np.zeros((num_zones, bf_len), dtype=R.dtype)
+    Q = np.zeros((bf_len, bf_len), dtype=R.dtype)
+
+    for k in range(num_zones):
+        Q.fill(0)
+        Q += audio_cov[k,:,:]
+        for i in range(num_zones):
+            if k != i:
+                if R.ndim == 3:
+                    Q += q[i] * R[i,:,:]
+                elif R.ndim == 4:
+                    Q += q[i] * R[i,k,:,:]
+        if R.ndim == 3:
+            eigval, eigvec = splin.eigh(R[k,:,:], Q)
+        elif R.ndim == 4:
+            eigval, eigvec = splin.eigh(R[k,k,:,:], Q)
+        w[k,:] = eigvec[:,-1]
+    return w
 
 
 

@@ -5,8 +5,13 @@ import aspcol.matrices as mat
 
 import aspcol.utilities as util
 
-def acc(Rb, Rd):
+def acc(Rb, Rd, reg_param=0):
     """
+    
+    Will calculate the principal generalized eigenvector of (Rb, Rd+reg*I)
+
+
+    OLD DOCUMENTATION:
     cov_bright and cov_dark is the szc spatial covariance matrices
      = H.T @ H, where H is a convolution matrix made up of the RIR, 
      summed over the appropriate microphones for bright and dark zones. 
@@ -18,7 +23,11 @@ def acc(Rb, Rd):
     assert Rb.shape[0] == Rd.shape[1]
     assert Rb.ndim == 2
     #Rd += 1e-4*np.eye(Rd.shape[0])
-    eigvals, evec = splin.eigh(Rb, mat.ensure_pos_def_adhoc(Rd, verbose=True))
+    if reg_param > 0:
+        Rd_reg = Rd + reg_param*np.eye(Rd.shape[0])
+    else:
+        Rd_reg = Rd
+    eigvals, evec = splin.eigh(Rb, mat.ensure_pos_def_adhoc(Rd_reg, verbose=True))
     
     #ir = evec[:,-1].reshape(1, num_ls, -1)
     #norm = np.sqrt(np.sum(ir**2))
@@ -27,7 +36,7 @@ def acc(Rb, Rd):
     return evec[:,-1] * np.sqrt(eigvals[-1])
 
 @util.measure("ACC")
-def acc_all_zones(R):
+def acc_all_zones(R, reg_param=0):
     """
     R is of shape (num_zones, num_zones, bf_len, bf_len)
     R[k,i,:,:] means spatial covariance associated with RIRs 
@@ -48,6 +57,6 @@ def acc_all_zones(R):
         for i in range(num_zones):
             if i != k:
                 Rd += R[i,k,:,:]
-        w[k,:] = acc(Rb, Rd)
+        w[k,:] = acc(Rb, Rd, reg_param)
 
     return w

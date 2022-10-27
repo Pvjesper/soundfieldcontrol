@@ -67,10 +67,15 @@ def get_fpaths(arrays, num_freqs, samplerate):
     return fpaths, freqs
 
 
-def paths_to_spatial_cov(arrays, source_name, zone_names, sources, filt_len, num_samples):
+def paths_to_spatial_cov(arrays, source_name, zone_names, sources, filt_len, num_samples, margin=None):
     """
     sources should be a list of the audio sources associated with each zone
         naturally the list of zone names and sources should be of the same length
+
+    by default it will use as many samples as possible (only remove rir_len-1 samples 
+        in the beginning since they haven't had time to propagate properly). 
+        margin can be supplied if a specific number of samples should be removed instead.
+        might give questionable result if you set margin to less than rir_len-1.
     
 
     Returns K^2 spatial covariance matrices R_{ki}, where k is the zones index of 
@@ -85,7 +90,7 @@ def paths_to_spatial_cov(arrays, source_name, zone_names, sources, filt_len, num
     R = np.zeros((num_zones, num_zones, filt_len*num_sources, filt_len*num_sources), dtype=float)
     for k in range(num_zones):
         for i in range(num_zones):
-            R[k,i,:,:] = mat.ensure_pos_semidef(spatial_cov(arrays.paths[source_name][zone_names[k]], sources[i], filt_len, num_samples))
+            R[k,i,:,:] = mat.ensure_pos_semidef(spatial_cov(arrays.paths[source_name][zone_names[k]], sources[i], filt_len, num_samples, margin=margin))
     return R
 
 def paths_to_spatial_cov_delta(arrays, source_name, zone_names, filt_len):
@@ -128,7 +133,7 @@ def rir_to_szc_cov(rir, ctrlfilt_len):
     return R
 
 
-def spatial_cov(ir, source, filt_len, num_samples):
+def spatial_cov(ir, source, filt_len, num_samples, margin=None):
     """
     ir is the room impulse responses of shape (num_ls, num_mic, ir_len)
         from all loudspeakers to one of the zones. 
@@ -136,18 +141,26 @@ def spatial_cov(ir, source, filt_len, num_samples):
     source is a source object with get_samples(num_samples) method, which returns
         the audio signal that should be reproduced in the sound zones
 
+    by default it will use as many samples as possible (only remove rir_len-1 samples 
+        in the beginning since they haven't had time to propagate properly). 
+        margin can be supplied if a specific number of samples should be removed instead.
+        might give questionable result if you set margin to less than rir_len-1.
+    
+
     The returned spatial covariance matrix is of size (num_ls*filt_len, num_ls*filt_len)
 
     """
     ir_len = ir.shape[-1]
     num_sources = ir.shape[0]
-    rir_filt = fc.createFilter(ir=ir, sumOverInput=False)
+    if margin is None:
+        margin = ir_len - 1
 
+    rir_filt = fc.createFilter(ir=ir, sumOverInput=False)
     source = copy.deepcopy(source)
-    in_sig = source.get_samples(num_samples+ir_len-1)
+    in_sig = source.get_samples(num_samples+margin)
     in_sig = np.tile(in_sig, (num_sources, 1))
     out_sig = rir_filt.process(in_sig)
-    out_sig = out_sig[...,ir_len-1:]
+    out_sig = out_sig[...,margin:]
     out_sig = np.moveaxis(out_sig, 0, 1)
     R = cr.corr_matrix(out_sig, out_sig, filt_len, filt_len)
     return R

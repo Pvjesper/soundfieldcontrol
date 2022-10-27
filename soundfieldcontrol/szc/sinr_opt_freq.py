@@ -132,6 +132,8 @@ def sinr_constrained_pow_min_downlink(R_values, avg_noise_pow, sinr_targets):
 
 def sinr_constrained_pow_min_uplink(R_values, avg_noise_pow, sinr_targets):
     """
+    Not correctly defined
+
     Solves the SINR constrained power minimization problem for transmit beamforming
         via semidefinite relaxation. Returns the optimal matrix, not the optimal 
         beamformer vector. Use any of the select_solution functions for that. 
@@ -192,21 +194,21 @@ def sinr_constrained_pow_min_uplink(R_values, avg_noise_pow, sinr_targets):
 
 
 
-def link_gain(w, R):
-    """
-    returns the matrix G as defined in 
-        'A general duality theory for uplink and downlink beamforming'
-        which is defined as G_ki = w_k^H R_i w_k
-    """
-    num_freqs = w.shape[0]
-    num_zones = w.shape[1]
-    G = np.zeros((num_freqs, num_zones, num_zones))
+# def link_gain(w, R):
+#     """
+#     returns the matrix G as defined in 
+#         'A general duality theory for uplink and downlink beamforming'
+#         which is defined as G_ki = w_k^H R_i w_k
+#     """
+#     num_freqs = w.shape[0]
+#     num_zones = w.shape[1]
+#     G = np.zeros((num_freqs, num_zones, num_zones))
 
-    for f in range(num_freqs):
-        for k in range(num_zones):
-            for i in range(num_zones):
-                G[f,k,i] = np.real_if_close(np.squeeze(w[f,k,:,None].T.conj() @ R[f,i,:,:] @ w[f,k,:,None]))
-    return G
+#     for f in range(num_freqs):
+#         for k in range(num_zones):
+#             for i in range(num_zones):
+#                 G[f,k,i] = np.real_if_close(np.squeeze(w[f,k,:,None].T.conj() @ R[f,i,:,:] @ w[f,k,:,None]))
+#     return G
 
 
 

@@ -91,6 +91,8 @@ def sinr_constrained_pow_min_downlink(R_values, avg_noise_pow, sinr_targets):
 @util.measure("Uplink")
 def sinr_constrained_pow_min_uplink(R_values, avg_noise_pow, sinr_targets):
     """
+    Not correctly defined
+
     Solves the SINR constrained power minimization problem for receive beamforming
         via semidefinite relaxation. Returns the optimal matrix, not the optimal 
         beamformer vector. Use any of the select_solution functions for that. 
@@ -148,6 +150,8 @@ def sinr_constrained_pow_min_uplink(R_values, avg_noise_pow, sinr_targets):
 
 def sinr_constrained_pow_min_uplink_separated(R_values, noise_pow, sinr_targets):
     """
+    Not correctly defined
+
     Solves the SINR constrained power minimization problem for receive beamforming
         via semidefinite relaxation. Returns the optimal matrix, not the optimal 
         beamformer vector. Use any of the select_solution functions for that. 
@@ -376,6 +380,70 @@ def sinr_margin_downlink_sdr(W, R, noise_pow, sinr_constraint):
                 sinr -= sinr_constraint[k] * np.trace(W[i,:,:] @ R[k,i,:,:])
         margin[k] = sinr
     return margin
+
+
+
+
+
+
+
+
+@util.measure("weighted_pow_min_downlink")
+def sinr_constrained_weighted_pow_min_downlink(R_values, avg_noise_pow, sinr_targets, audio_cov_values):
+    """
+    Solves the SINR constrained power minimization problem for transmit beamforming
+        via semidefinite relaxation. Returns the optimal matrix, not the optimal 
+        beamformer vector. Use any of the select_solution functions for that. 
+
+    R_values is the spatial covariance matrices R_{ki}, where k is the zone index of 
+        the microphones and i is the zone index of the audio signal
+        The array should have has shape (num_zones, num_zones, bf_len, bf_len)
+        where bf_len = num_ls*ir_len, and is indexed as R_{ki} = R[k,i,:,:]
+
+    avg_noise_pow is positive real values of shape (num_zones)
+    sinr_targets is positive real values of shape (num_zones)
+
+    returns opt_mat which has shape (num_zones, bf_len, bf_len)
+    """
+    num_zones = R_values.shape[1]
+    mat_size = R_values.shape[2]
+    assert R_values.shape == (num_zones, num_zones, mat_size, mat_size)
+    assert len(avg_noise_pow) == num_zones
+    assert len(sinr_targets) == num_zones
+
+    opt_mat = np.zeros((num_zones, mat_size, mat_size), dtype=float)
+    W = [cp.Variable((mat_size, mat_size), PSD=True) for _ in range(num_zones)]
+    audio_cov = [cp.Parameter((mat_size, mat_size), PSD=True) for _ in range(num_zones)]
+    R = [[cp.Parameter((mat_size, mat_size), PSD=True) for _ in range(num_zones)] for _ in range(num_zones)]
+    sinr_target = [cp.Parameter(pos=True) for _ in range(num_zones)]
+    noise_pow = [cp.Parameter(pos=True) for _ in range(num_zones)]
+    constraints = []
+
+    for k in range(num_zones):
+        new_constr = cp.trace(R[k][k] @ W[k]) - sinr_target[k] * noise_pow[k]
+        for i in range(num_zones):
+            if k != i:
+                new_constr -= sinr_target[k] * cp.trace(R[k][i] @ W[i])
+        constraints.append(new_constr >= 0)
+                    
+    for k in range(num_zones):
+        constraints.append(W[k] == W[k].T)
+
+    obj = cp.Minimize(cp.sum([cp.trace(audio_cov_z @ W_z) for W_z, audio_cov_z in zip(W, audio_cov)]))
+    prob = cp.Problem(obj, constraints)
+
+
+    for k in range(num_zones):
+        for i in range(num_zones):
+            R[k][i].value = R_values[k,i,:,:]
+        sinr_target[k].value = sinr_targets[k]
+        noise_pow[k].value = avg_noise_pow[k]
+        audio_cov[k].value = audio_cov_values[k]
+    prob.solve(verbose=False, ignore_dpp=True, eps=1e-8, max_iters=10000)
+    print(prob.status)
+    for k in range(num_zones):
+        opt_mat[k,:,:] = W[k].value
+    return opt_mat
 
 
 

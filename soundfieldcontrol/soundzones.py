@@ -50,8 +50,15 @@ class SoundzoneFIR(base.AudioProcessor):
 
         self.control_filters = [fc.createFilter(ir) for ir in control_filter_ir]
 
+
+        start_sample = self.sim_info.samplerate*3
+        end_sample = self.sim_info.tot_samples
         #diag_preset_power_of_signals(self)
         self.diag.add_diagnostic(f"power_ls_tot", dia.SignalPower(f"ls_tot", self.sim_info, self.blockSize, preprocess=[[dplot.smooth(self.sim_info.output_smoothing)]]))
+        #self.diag.add_diagnostic(f"power_ls_tot_summary_old", dia.SignalPower(f"ls_tot", self.sim_info, self.blockSize, 
+        #                        save_at=diacore.IntervalCounter(((start_sample, end_sample),)), export_func="text"))
+        self.diag.add_diagnostic(f"power_ls_tot_summary", dia.SignalPowerSummary(f"ls_tot", self.sim_info, self.blockSize, (start_sample, end_sample)))
+        
         for k in range(self.num_zones):
             self.diag.add_diagnostic(f"power_audio_signal_{k}", dia.SignalPower(f"audio_sig_{k}", self.sim_info, self.blockSize, preprocess=[[dplot.smooth(self.sim_info.output_smoothing)]]))
             self.diag.add_diagnostic(f"power_ls_{k}", dia.SignalPower(f"ls_{k}", self.sim_info, self.blockSize, preprocess=[[dplot.smooth(self.sim_info.output_smoothing)]]))
@@ -63,11 +70,23 @@ class SoundzoneFIR(base.AudioProcessor):
             self.diag.add_diagnostic(f"power_noise_src_{k}", dia.SignalPower(f"noise_src_{k}", self.sim_info, self.blockSize, preprocess=[[dplot.smooth(self.sim_info.output_smoothing)]]))
             self.diag.add_diagnostic(f"power_noise_at_mic_{k}", dia.SignalPower(f"noise_src_{k}~mic_{k}", self.sim_info, self.blockSize, preprocess=[[dplot.smooth(self.sim_info.output_smoothing)]]))
 
+            self.diag.add_diagnostic(f"power_desired_sig_{k}_summary", dia.SignalPowerSummary(f"ls_{k}~mic_{k}", self.sim_info, self.blockSize, (start_sample, end_sample)))
+            self.diag.add_diagnostic(f"power_interference_{k}_summary", dia.SignalPowerSummary(f"interference_{k}", self.sim_info, self.blockSize, (start_sample, end_sample)))
+            
+
             self.diag.add_diagnostic(f"sinr_{k}", dia.SignalPowerRatio(f"ls_{k}~mic_{k}", f"interference_{k}", self.sim_info, self.blockSize))
+            #self.diag.add_diagnostic(f"sinr_{k}_summary_old", dia.SignalPowerRatio(f"ls_{k}~mic_{k}", f"interference_{k}", self.sim_info, self.blockSize, 
+            #                        save_at=diacore.IntervalCounter(((start_sample, end_sample),)), export_func="text"))
+            self.diag.add_diagnostic(f"sinr_{k}_summary", dia.SignalPowerRatioSummary(f"ls_{k}~mic_{k}", f"interference_{k}", self.sim_info, self.blockSize,
+                                    (start_sample, end_sample)))
+
             self.diag.add_diagnostic(f"acoustic_contrast_{k}", dia.SignalPowerRatio(f"ls_{k}~mic_{k}", f"bleed_ls_{k}", self.sim_info, self.blockSize))#, preprocess=dplot.db_power))
 
             self.diag.add_diagnostic(f"rir_{k}", dia.RecordFilter(f"arrays.paths['ls_{k}']['mic_{k}']", self.sim_info, self.blockSize, save_at=[1]))
             self.diag.add_diagnostic(f"ir_control_filter_{k}", dia.RecordFilter(f"control_filters[{k}].ir", self.sim_info, self.blockSize, save_at=[1]))
+
+            self.diag.add_diagnostic(f"spectrum_desired_sig_{k}", dia.SignalPowerSpectrum(f"ls_{k}~mic_{k}", self.sim_info, self.blockSize, (start_sample, end_sample), self.arrays[f"mic_{k}"].num, preprocess=[[dplot.db_power]]))
+            self.diag.add_diagnostic(f"spectrum_interference_{k}", dia.SignalPowerSpectrum(f"interference_{k}", self.sim_info, self.blockSize, (start_sample, end_sample), self.arrays[f"mic_{k}"].num, preprocess=[[dplot.db_power]]))
 
         #self.diag.add_diagnostic("acoustic_contrast_mic", dia.SignalPowerRatio(self.sim_info, "mic", "mic", blockSize=self.blockSize, numerator_channels=arrays["mic"].group_idxs[0], denom_channels=arrays["mic"].group_idxs[1]))
         #self.diag.add_diagnostic("bright_mic_error", dia.SignalPowerRatio(self.sim_info, "error_bright", "desired", blockSize=self.blockSize))
@@ -83,6 +102,7 @@ class SoundzoneFIR(base.AudioProcessor):
         self.metadata["source type"] = [asrc.__class__.__name__ for asrc in self.audio_sources]
         self.metadata["source"] = [asrc.metadata for asrc in self.audio_sources]
         self.metadata["num zones"] = self.num_zones
+        self.metadata["summary samples"] = (start_sample, end_sample)
 
 
     def process(self, num_samples):
@@ -98,7 +118,7 @@ class SoundzoneFIR(base.AudioProcessor):
 
     def calc_diagnostic_signals(self, num_samples):
         for k in range(self.num_zones):
-            self.sig[f"ls_tot"][:,self.idx-num_samples:self.idx] += self.sig[f"ls_{k}"][:,self.idx-num_samples:self.idx]
+            self.sig[f"ls_tot"][:,self.idx-num_samples:self.idx] += self.sig[f"ls_{k}"][:,self.idx-num_samples:self.idx] * np.sqrt(self.arrays["ls_0"].num)
 
             self.sig[f"interference_{k}"][:,self.idx-num_samples:self.idx] = self.sig[f"noise_src_{k}~mic_{k}"][:,self.idx-num_samples:self.idx]
             for i in range(self.num_zones):
