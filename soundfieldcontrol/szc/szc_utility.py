@@ -34,14 +34,17 @@ def freq_to_time_beamformer(w, num_freqs):
     ir = ir[:1,:,:]
     return ir
 
-# def add_proc(sim, source, w, num_freqs):
-#     ir = freq_to_time_beamformer(w, num_freqs)
-#     proc = sz.SoundzoneFixedFIR(sim.sim_info, sim.arrays, 2048, copy.deepcopy(source), ir)
-#     proc.name = f"sinr opt"
-#     sim.addProcessor(proc)
 
 
 def fpaths_to_spatial_cov(arrays, fpaths, source_name, zone_names):
+    """
+    - arrays is ArrayCollection object
+    - fpaths is the frequency domain RIRs, see function get_fpaths() in this module
+    - source name is a string for a source in arrays
+    - zone_names is a list of strings to microphones in arrays
+
+    returns a spatial covariance matrix R of shape (num_freqs, num_zones, num_src, num_src)
+    """
     num_sources = arrays[source_name].num
     num_freqs = fpaths[source_name][zone_names[0]].shape[0]
     num_zones = len(zone_names)
@@ -54,9 +57,15 @@ def fpaths_to_spatial_cov(arrays, fpaths, source_name, zone_names):
     for k in range(num_zones):
         for f in range(num_freqs):
             R[f,k,:,:] = mat.ensure_pos_semidef(H[k][f,:,:].T.conj() @ H[k][f,:,:])
+        num_mics = H[k][f].shape[0]
+        R[:,k,:,:] /= num_mics
     return R
 
 def get_fpaths(arrays, num_freqs, samplerate):
+    """
+    returns a dictionary with frequency domain RIRs 
+        each entry has shape 
+    """
     freqs = fd.getFrequencyValues(num_freqs, samplerate)
     num_real_freqs = freqs.shape[0]
 
