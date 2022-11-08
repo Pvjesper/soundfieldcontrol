@@ -3,10 +3,11 @@ import numpy as np
 import scipy.linalg as splin
 import copy
 
-import ancsim.signal.filterdesign as fd
+
 import ancsim.signal.filterclasses as fc
 import ancsim.signal.freqdomainfiltering as fdf
 
+import aspcol.filterdesign as fd
 import aspcol.matrices as mat
 import aspcol.correlation as cr
 
@@ -35,6 +36,29 @@ def freq_to_time_beamformer(w, num_freqs):
     return ir
 
 
+
+def spatial_cov_freq_superpos(Hb, Hd, d=None):
+    """
+    Hb are transfer functions from loudspeakers to bright zone
+        (num_freq, num_micb, num_ls)
+    
+    d is desired pressure in the bright zone 
+        (num_freq, num_micb, 1)
+    """
+    assert Hb.ndim == 3 and Hd.ndim == 3
+    assert Hb.shape[0] == Hd.shape[0]
+    assert Hb.shape[2] == Hd.shape[2]
+    num_micb = Hb.shape[1]
+    num_micd = Hd.shape[1]
+    Rb = np.moveaxis(Hb.conj(),1,2) @ Hb / num_micb
+    Rd = np.moveaxis(Hd.conj(),1,2) @ Hd / num_micd
+    
+    if d is not None:
+        assert d.shape == (Hb.shape[0], Hb.shape[1], 1)
+        rb = np.moveaxis(Hb.conj(),1,2) @ d / num_micb
+        return Rb, Rd, rb
+    else:
+        return Rb, Rd
 
 def fpaths_to_spatial_cov(arrays, fpaths, source_name, zone_names):
     """
@@ -66,7 +90,7 @@ def get_fpaths(arrays, num_freqs, samplerate):
     returns a dictionary with frequency domain RIRs 
         each entry has shape 
     """
-    freqs = fd.getFrequencyValues(num_freqs, samplerate)
+    freqs = fd.get_frequency_values(num_freqs, samplerate)
     num_real_freqs = freqs.shape[0]
 
     fpaths = {}

@@ -60,3 +60,12 @@ def acc_all_zones(R, reg_param=0):
         w[k,:] = acc(Rb, Rd, reg_param)
 
     return w
+
+
+
+
+def pressure_matching(Rb, Rd, rb, mu):
+    raise NotImplementedError
+
+def vast(Rb, Rd, rb, mu, rank):
+    raise NotImplementedError
